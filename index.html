@@ -2,33 +2,231 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Дурак — игра</title>
+    <title>Дурак — карточная игра</title>
     <style>
-        * { touch-action: manipulation; user-select: none; }
-        body { background: #1a472a; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; font-family: system-ui; }
-        #game { background: #2e7d32; border-radius: 40px; padding: 15px; width: 98%; max-width: 500px; }
-        .hand, .table, .info { background: #1b5e20; border-radius: 28px; margin: 12px 0; padding: 12px; }
+        * { touch-action: manipulation; user-select: none; -webkit-tap-highlight-color: transparent; }
+        body { background: #1a472a; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; font-family: system-ui, 'Segoe UI', monospace; }
+        #game { background: #2e7d32; border-radius: 40px; padding: 15px; box-shadow: 0 20px 35px rgba(0,0,0,0.4); width: 98%; max-width: 500px; }
+        .hand, .table, .info { background: #1b5e20; border-radius: 28px; margin: 12px 0; padding: 12px; box-shadow: inset 0 1px 4px #4caf50, 0 4px 8px black; }
         .hand { min-height: 130px; }
         .table { min-height: 120px; background: #2e2e1e; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-        .card { background: white; width: 70px; height: 95px; border-radius: 12px; display: inline-flex; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; font-size: 28px; margin: 4px; box-shadow: -2px 2px 5px rgba(0,0,0,0.3); cursor: pointer; }
+        .card { background: white; width: 70px; height: 95px; border-radius: 12px; display: inline-flex; flex-direction: column; justify-content: center; align-items: center; font-weight: bold; font-size: 28px; margin: 4px; box-shadow: -2px 2px 5px rgba(0,0,0,0.3); transition: 0.1s linear; cursor: pointer; touch-action: manipulation; }
         .card:active { transform: scale(0.96); }
         .red { color: #c62828; }
-        button { background: #ffb74d; border: none; font-size: 1.4rem; padding: 12px 20px; border-radius: 60px; margin: 8px; }
-        .info { text-align: center; color: gold; background: #0a2f1a; padding: 8px; }
+        .black { color: #1f1f1f; }
+        button { background: #ffb74d; border: none; font-size: 1.4rem; padding: 12px 20px; border-radius: 60px; font-weight: bold; margin: 8px; touch-action: manipulation; }
+        .info { text-align: center; font-size: 1.2rem; color: gold; background: #0a2f1a; }
+        @media (max-width: 500px) { .card { width: 55px; height: 75px; font-size: 22px; } }
     </style>
 </head>
 <body>
 <div id="game">
-    <div class="info" id="statusText">🃟 Добро пожаловать в Дурака!</div>
+    <div class="info" id="statusText">⚡ Ходишь ты! Нажми на карту</div>
     <div class="table" id="tableZone">🃟 Стол пуст</div>
-    <div class="hand" id="handZone">🃟 Нажми "Новая игра"</div>
-    <div style="text-align: center;">
-        <button onclick="alert('Работает! Сейчас добавлю бота и козыри. Обновлю через минуту.')">🔄 Новая игра</button>
+    <div class="hand" id="handZone">🃟 Твои карты</div>
+    <div style="display: flex; gap: 10px; justify-content: center;">
+        <button id="passBtn">🤚 Пас</button>
+        <button id="resetBtn">🔄 Новая игра</button>
     </div>
+    <div class="info" id="debugInfo">🃟 Загрузка...</div>
 </div>
+
 <script>
-    document.getElementById('handZone').innerHTML = '<div class="card">6♥</div><div class="card">7♦</div><div class="card">8♣</div><div class="card">9♠</div><div class="card">10♥</div><div class="card">В♦</div>';
-    document.getElementById('statusText').innerHTML = '✅ Игра загружена! Полная версия с ботом будет через 5 минут';
+    let deck = [], playerHand = [], botHand = [], tableCards = [];
+    let trumpSuit = '♥', turn = 'player', attackPending = true;
+    const suits = ['♥', '♦', '♣', '♠'];
+    const values = ['6','7','8','9','10','В','Д','К','Т'];
+    
+    function getCardColor(suit) { return (suit === '♥' || suit === '♦') ? 'red' : 'black'; }
+    function cardValueRank(card) { return values.indexOf(card.value); }
+    
+    function isHigherBeat(attackCard, defendCard, trump) {
+        if(defendCard.suit === attackCard.suit) return cardValueRank(defendCard) > cardValueRank(attackCard);
+        if(defendCard.suit === trump) return true;
+        return false;
+    }
+    
+    function initDeck() {
+        let d = [];
+        for(let s of suits) for(let v of values) d.push({ suit: s, value: v });
+        for(let i=d.length-1; i>0; i--) { let j = Math.floor(Math.random()*(i+1)); [d[i], d[j]] = [d[j], d[i]]; }
+        return d;
+    }
+    
+    function getTrump(deckArr) { return deckArr.find(c => suits.includes(c.suit))?.suit || '♠'; }
+    
+    function dealCards(deckArr, playerCnt=6, botCnt=6) {
+        let p = [], b = [];
+        for(let i=0; i<playerCnt && deckArr.length; i++) p.push(deckArr.shift());
+        for(let i=0; i<botCnt && deckArr.length; i++) b.push(deckArr.shift());
+        return { playerHand: p, botHand: b, remainingDeck: deckArr };
+    }
+    
+    function refreshUI() {
+        const handDiv = document.getElementById('handZone');
+        if(!playerHand.length) handDiv.innerHTML = '🃟 Нет карт. Жми "Новая игра"';
+        else {
+            let html = '';
+            playerHand.forEach((c, i) => {
+                html += `<div class="card ${getCardColor(c.suit)}" data-card-index="${i}">${c.value}<br>${c.suit}</div>`;
+            });
+            handDiv.innerHTML = html;
+            document.querySelectorAll('#handZone .card').forEach(el => {
+                el.addEventListener('click', (e) => {
+                    let idx = el.getAttribute('data-card-index');
+                    if(idx !== null && turn === 'player') onPlayerSelectCard(parseInt(idx));
+                    else document.getElementById('statusText').innerText = '❌ Сейчас не твой ход!';
+                });
+            });
+        }
+        
+        const tableDiv = document.getElementById('tableZone');
+        if(!tableCards.length) tableDiv.innerHTML = '🃟 Стол пуст. Твой ход — клади карту.';
+        else {
+            let html = '';
+            tableCards.forEach(entry => {
+                let c = entry.card;
+                html += `<div class="card ${getCardColor(c.suit)}" style="background:#fff3e0;">${c.value}${c.suit}<br>${entry.isAttack ? '⚔️' : '🛡️'}</div>`;
+            });
+            tableDiv.innerHTML = html;
+        }
+        
+        document.getElementById('statusText').innerHTML = turn === 'player' ? '🎲 ТВОЙ ХОД. Атакуй или бей!' : '🤖 Бот думает...';
+        document.getElementById('debugInfo').innerHTML = `🃟 Козырь: ${trumpSuit} | Карт в колоде: ${deck.length} | Твоих: ${playerHand.length} | Бот: ${botHand.length}`;
+    }
+    
+    function clearTableAndDraw() {
+        tableCards = [];
+        while(playerHand.length < 6 && deck.length) playerHand.push(deck.shift());
+        while(botHand.length < 6 && deck.length) botHand.push(deck.shift());
+        
+        if(!playerHand.length) { document.getElementById('statusText').innerText = '🎉 ТЫ ВЫИГРАЛ! Сыграй ещё!'; turn = 'none'; refreshUI(); return; }
+        if(!botHand.length) { document.getElementById('statusText').innerText = '💀 Бот выиграл... Нажми "Новая игра"'; turn = 'none'; refreshUI(); return; }
+        
+        turn = 'player';
+        attackPending = true;
+        refreshUI();
+    }
+    
+    function onPlayerSelectCard(index) {
+        if(turn !== 'player') return;
+        const selectedCard = playerHand[index];
+        
+        if(!tableCards.length) {
+            playerHand.splice(index,1);
+            tableCards.push({ card: selectedCard, isAttack: true });
+            attackPending = false;
+            turn = 'bot';
+            refreshUI();
+            setTimeout(() => botTurn(), 200);
+            return;
+        }
+        
+        const lastEntry = tableCards[tableCards.length-1];
+        if(lastEntry.isAttack && !attackPending) {
+            let canThrow = tableCards.some(entry => entry.card.value === selectedCard.value);
+            if(canThrow) {
+                playerHand.splice(index,1);
+                tableCards.push({ card: selectedCard, isAttack: true });
+                refreshUI();
+                turn = 'bot';
+                setTimeout(() => botTurn(), 250);
+                return;
+            } else {
+                document.getElementById('statusText').innerText = '❌ Нельзя подкинуть — нет такого номинала!';
+                refreshUI();
+                return;
+            }
+        }
+        
+        if(tableCards.length && tableCards[tableCards.length-1].isAttack) {
+            const attackCard = tableCards[tableCards.length-1].card;
+            if(isHigherBeat(attackCard, selectedCard, trumpSuit)) {
+                playerHand.splice(index,1);
+                tableCards.push({ card: selectedCard, isAttack: false });
+                const allDefended = tableCards.every(e => !e.isAttack);
+                if(allDefended) clearTableAndDraw();
+                else { turn = 'player'; refreshUI(); }
+                return;
+            } else {
+                document.getElementById('statusText').innerText = '❌ Не можешь побить! Ходи другой картой или пас.';
+                refreshUI();
+                return;
+            }
+        }
+        
+        document.getElementById('statusText').innerText = '🤔 Сейчас нельзя сходить так. Попробуй пас.';
+        refreshUI();
+    }
+    
+    function botTurn() {
+        if(turn !== 'bot') return;
+        
+        if(!tableCards.length) {
+            if(!botHand.length) { clearTableAndDraw(); return; }
+            const randomIndex = Math.floor(Math.random() * botHand.length);
+            const card = botHand[randomIndex];
+            botHand.splice(randomIndex,1);
+            tableCards.push({ card, isAttack: true });
+            turn = 'player';
+            refreshUI();
+            return;
+        }
+        
+        const lastAttackIdx = [...tableCards].reverse().findIndex(e => e.isAttack);
+        if(lastAttackIdx !== -1) {
+            const realIndex = tableCards.length - 1 - lastAttackIdx;
+            const attackCard = tableCards[realIndex].card;
+            let beatIndex = botHand.findIndex(card => isHigherBeat(attackCard, card, trumpSuit));
+            if(beatIndex !== -1) {
+                const [beatCard] = botHand.splice(beatIndex,1);
+                tableCards.push({ card: beatCard, isAttack: false });
+                if(tableCards.every(e => !e.isAttack)) clearTableAndDraw();
+                else { turn = 'player'; refreshUI(); }
+                return;
+            } else {
+                for(let entry of tableCards) botHand.push(entry.card);
+                tableCards = [];
+                while(botHand.length < 6 && deck.length) botHand.push(deck.shift());
+                while(playerHand.length < 6 && deck.length) playerHand.push(deck.shift());
+                turn = 'player';
+                refreshUI();
+                if(!playerHand.length || !botHand.length) clearTableAndDraw();
+                return;
+            }
+        } else {
+            turn = 'player';
+            refreshUI();
+        }
+    }
+    
+    function resetGame() {
+        deck = initDeck();
+        trumpSuit = getTrump(deck);
+        const dealt = dealCards(deck);
+        playerHand = dealt.playerHand;
+        botHand = dealt.botHand;
+        deck = dealt.remainingDeck;
+        tableCards = [];
+        turn = 'player';
+        attackPending = true;
+        refreshUI();
+    }
+    
+    document.getElementById('passBtn').addEventListener('click', () => {
+        if(turn === 'player' && tableCards.length) {
+            for(let entry of tableCards) playerHand.push(entry.card);
+            tableCards = [];
+            while(playerHand.length < 6 && deck.length) playerHand.push(deck.shift());
+            while(botHand.length < 6 && deck.length) botHand.push(deck.shift());
+            turn = 'bot';
+            refreshUI();
+            setTimeout(() => botTurn(), 200);
+        } else document.getElementById('statusText').innerText = 'Нельзя пасовать сейчас';
+    });
+    
+    document.getElementById('resetBtn').addEventListener('click', () => resetGame());
+    resetGame();
 </script>
 </body>
 </html>
